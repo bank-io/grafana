@@ -24,6 +24,7 @@ import (
 )
 
 var (
+	SocialBaseUrl = "/login/"
 	oauthLogger          = log.New("oauth")
 	OauthStateCookieName = "oauth_state"
 )
@@ -68,6 +69,20 @@ func (hs *HTTPServer) OAuthLogin(ctx *models.ReqContext) {
 		return
 	}
 
+	forwardedHost, hasForwardedHost := ctx.Req.Header["X-Forwarded-Host"]
+	forwardedProto, hasForwardedProto := ctx.Req.Header["X-Forwarded-Proto"]
+
+	var oauth2RedirectURI oauth2.AuthCodeOption = nil
+
+	if hasForwardedHost && hasForwardedProto {
+		redirectUri := url.URL{
+			Scheme: forwardedProto[0],
+			Host:   forwardedHost[0],
+		}
+
+		oauth2RedirectURI = oauth2.SetAuthURLParam("redirect_uri", redirectUri.String() + SocialBaseUrl + name)
+	}
+
 	code := ctx.Query("code")
 	if code == "" {
 		state, err := GenStateString()
@@ -83,9 +98,9 @@ func (hs *HTTPServer) OAuthLogin(ctx *models.ReqContext) {
 		hashedState := hashStatecode(state, setting.OAuthService.OAuthInfos[name].ClientSecret)
 		cookies.WriteCookie(ctx.Resp, OauthStateCookieName, hashedState, hs.Cfg.OAuthCookieMaxAge, hs.CookieOptionsFromCfg)
 		if setting.OAuthService.OAuthInfos[name].HostedDomain == "" {
-			ctx.Redirect(connect.AuthCodeURL(state, oauth2.AccessTypeOnline))
+			ctx.Redirect(connect.AuthCodeURL(state, oauth2RedirectURI, oauth2.AccessTypeOnline))
 		} else {
-			ctx.Redirect(connect.AuthCodeURL(state, oauth2.SetAuthURLParam("hd", setting.OAuthService.OAuthInfos[name].HostedDomain), oauth2.AccessTypeOnline))
+			ctx.Redirect(connect.AuthCodeURL(state, oauth2RedirectURI, oauth2.SetAuthURLParam("hd", setting.OAuthService.OAuthInfos[name].HostedDomain), oauth2.AccessTypeOnline))
 		}
 		return
 	}
@@ -126,7 +141,7 @@ func (hs *HTTPServer) OAuthLogin(ctx *models.ReqContext) {
 	oauthCtx := context.WithValue(context.Background(), oauth2.HTTPClient, oauthClient)
 
 	// get token from provider
-	token, err := connect.Exchange(oauthCtx, code)
+	token, err := connect.Exchange(oauthCtx, code, oauth2RedirectURI)
 	if err != nil {
 		hs.handleOAuthLoginError(ctx, loginInfo, LoginError{
 			HttpStatus:    http.StatusInternalServerError,
