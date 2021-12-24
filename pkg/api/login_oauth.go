@@ -29,6 +29,7 @@ var (
 )
 
 const (
+	SocialBaseUrl = "/login/"
 	OauthStateCookieName = "oauth_state"
 	OauthPKCECookieName  = "oauth_code_verifier"
 )
@@ -100,6 +101,20 @@ func (hs *HTTPServer) OAuthLogin(ctx *models.ReqContext) response.Response {
 		return nil
 	}
 
+	forwardedHost, hasForwardedHost := ctx.Req.Header["X-Forwarded-Host"]
+	forwardedProto, hasForwardedProto := ctx.Req.Header["X-Forwarded-Proto"]
+
+	var oauth2RedirectURI oauth2.AuthCodeOption = nil
+
+	if hasForwardedHost && hasForwardedProto {
+		redirectUri := url.URL{
+			Scheme: forwardedProto[0],
+			Host:   forwardedHost[0],
+		}
+
+		oauth2RedirectURI = oauth2.SetAuthURLParam("redirect_uri", redirectUri.String() + SocialBaseUrl + name)
+	}
+
 	code := ctx.Query("code")
 	if code == "" {
 		opts := []oauth2.AuthCodeOption{oauth2.AccessTypeOnline}
@@ -138,7 +153,7 @@ func (hs *HTTPServer) OAuthLogin(ctx *models.ReqContext) response.Response {
 			opts = append(opts, oauth2.SetAuthURLParam("hd", provider.HostedDomain))
 		}
 
-		ctx.Redirect(connect.AuthCodeURL(state, opts...))
+		ctx.Redirect(connect.AuthCodeURL(state,  oauth2RedirectURI, opts...))
 		return nil
 	}
 
@@ -187,7 +202,7 @@ func (hs *HTTPServer) OAuthLogin(ctx *models.ReqContext) response.Response {
 	}
 
 	// get token from provider
-	token, err := connect.Exchange(oauthCtx, code, opts...)
+	token, err := connect.Exchange(oauthCtx, code, oauth2RedirectURI, opts...)
 	if err != nil {
 		hs.handleOAuthLoginError(ctx, loginInfo, LoginError{
 			HttpStatus:    http.StatusInternalServerError,
