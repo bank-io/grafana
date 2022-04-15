@@ -153,7 +153,16 @@ func (hs *HTTPServer) OAuthLogin(ctx *models.ReqContext) response.Response {
 			opts = append(opts, oauth2.SetAuthURLParam("hd", provider.HostedDomain))
 		}
 
-		ctx.Redirect(connect.AuthCodeURL(state,  oauth2RedirectURI, opts...))
+		organizationParam := ctx.Query("organization")
+		if organizationParam != "" {
+			opts = append(opts, oauth2.SetAuthURLParam("organization", organizationParam))
+		}
+
+		if oauth2RedirectURI != nil {
+			opts = append(opts, oauth2RedirectURI)
+		}
+
+		ctx.Redirect(connect.AuthCodeURL(state, opts...))
 		return nil
 	}
 
@@ -201,8 +210,12 @@ func (hs *HTTPServer) OAuthLogin(ctx *models.ReqContext) response.Response {
 		)
 	}
 
+	if oauth2RedirectURI != nil {
+		opts = append(opts, oauth2RedirectURI)
+	}
+
 	// get token from provider
-	token, err := connect.Exchange(oauthCtx, code, oauth2RedirectURI, opts...)
+	token, err := connect.Exchange(oauthCtx, code, opts...)
 	if err != nil {
 		hs.handleOAuthLoginError(ctx, loginInfo, LoginError{
 			HttpStatus:    http.StatusInternalServerError,
